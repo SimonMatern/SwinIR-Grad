@@ -2,6 +2,7 @@
 # SwinIR: Image Restoration Using Swin Transformer, https://arxiv.org/abs/2108.10257
 # Originally Written by Ze Liu, Modified by Jingyun Liang.
 # -----------------------------------------------------------------------------------
+# Further Modification using gradiend domain: Simon Matern & Monika Kwiatkowski
 
 import math
 import torch
@@ -9,7 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint as checkpoint
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
-
+from gradients import Mixed2RGB, RGB2Mixed
 
 class Mlp(nn.Module):
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
@@ -643,16 +644,29 @@ class SwinIR(nn.Module):
         resi_connection: The convolutional block before residual connection. '1conv'/'3conv'
     """
 
-    def __init__(self, img_size=64, patch_size=1, in_chans=3,
+    def __init__(self, img_size=(256,256), patch_size=1, in_chans=3,
                  embed_dim=96, depths=[6, 6, 6, 6], num_heads=[6, 6, 6, 6],
                  window_size=7, mlp_ratio=4., qkv_bias=True, qk_scale=None,
                  drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1,
-                 norm_layer=nn.LayerNorm, ape=False, patch_norm=True,
-                 use_checkpoint=False, upscale=2, img_range=1., upsampler='', resi_connection='1conv',
+                 ape=False, patch_norm=True,
+                 use_checkpoint=False, upscale=2, img_range=1., upsampler='pixelshuffle', resi_connection='1conv',
+                 use_gradients=False,
                  **kwargs):
         super(SwinIR, self).__init__()
+
         num_in_ch = in_chans
         num_out_ch = in_chans
+
+        if use_gradients:
+            num_in_ch = num_in_ch * 3
+            num_out_ch = num_out_ch * 3
+
+            self.Mixed2RGB = Mixed2RGB((img_size[0]*upscale,img_size[1]*upscale))
+            self.RGB2Mixed = RGB2Mixed()
+        else:
+            self.Mixed2RGB = nn.Identity()
+            self.RGB2Mixed = nn.Identity()
+
         num_feat = 64
         self.img_range = img_range
         if in_chans == 3:
@@ -663,7 +677,9 @@ class SwinIR(nn.Module):
         self.upscale = upscale
         self.upsampler = upsampler
         self.window_size = window_size
+        
 
+        
         #####################################################################################################
         ################################### 1, shallow feature extraction ###################################
         self.conv_first = nn.Conv2d(num_in_ch, embed_dim, 3, 1, 1)
@@ -680,7 +696,7 @@ class SwinIR(nn.Module):
         # split image into non-overlapping patches
         self.patch_embed = PatchEmbed(
             img_size=img_size, patch_size=patch_size, in_chans=embed_dim, embed_dim=embed_dim,
-            norm_layer=norm_layer if self.patch_norm else None)
+            norm_layer=nn.LayerNorm if self.patch_norm else None)
         num_patches = self.patch_embed.num_patches
         patches_resolution = self.patch_embed.patches_resolution
         self.patches_resolution = patches_resolution
@@ -688,7 +704,7 @@ class SwinIR(nn.Module):
         # merge non-overlapping patches into image
         self.patch_unembed = PatchUnEmbed(
             img_size=img_size, patch_size=patch_size, in_chans=embed_dim, embed_dim=embed_dim,
-            norm_layer=norm_layer if self.patch_norm else None)
+            norm_layer=nn.LayerNorm if self.patch_norm else None)
 
         # absolute position embedding
         if self.ape:
@@ -713,7 +729,7 @@ class SwinIR(nn.Module):
                          qkv_bias=qkv_bias, qk_scale=qk_scale,
                          drop=drop_rate, attn_drop=attn_drop_rate,
                          drop_path=dpr[sum(depths[:i_layer]):sum(depths[:i_layer + 1])],  # no impact on SR results
-                         norm_layer=norm_layer,
+                         norm_layer=nn.LayerNorm,
                          downsample=None,
                          use_checkpoint=use_checkpoint,
                          img_size=img_size,
@@ -722,7 +738,7 @@ class SwinIR(nn.Module):
 
                          )
             self.layers.append(layer)
-        self.norm = norm_layer(self.num_features)
+        self.norm = nn.LayerNorm(self.num_features)
 
         # build the last conv layer in deep feature extraction
         if resi_connection == '1conv':
@@ -743,6 +759,7 @@ class SwinIR(nn.Module):
                                                       nn.LeakyReLU(inplace=True))
             self.upsample = Upsample(upscale, num_feat)
             self.conv_last = nn.Conv2d(num_feat, num_out_ch, 3, 1, 1)
+            
         elif self.upsampler == 'pixelshuffledirect':
             # for lightweight SR (to save parameters)
             self.upsample = UpsampleOneStep(upscale, embed_dim, num_out_ch,
@@ -808,6 +825,7 @@ class SwinIR(nn.Module):
         
         self.mean = self.mean.type_as(x)
         x = (x - self.mean) * self.img_range
+        x = self.RGB2Mixed(x)
 
         if self.upsampler == 'pixelshuffle':
             # for classical SR
@@ -815,6 +833,8 @@ class SwinIR(nn.Module):
             x = self.conv_after_body(self.forward_features(x)) + x
             x = self.conv_before_upsample(x)
             x = self.conv_last(self.upsample(x))
+            x = self.Mixed2RGB(x)
+
         elif self.upsampler == 'pixelshuffledirect':
             # for lightweight SR
             x = self.conv_first(x)

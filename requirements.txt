@@ -1,0 +1,13 @@
+torchvision
+torch
+numpy
+opencv-python
+tqdm
+Pillow
+timm
+ipython
+jupyterlab
+einops
+kornia
+lightning
+jsonargparse[signatures]>=4.27.7
