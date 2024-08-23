@@ -9,38 +9,54 @@ class RGB2Mixed(nn.Module):
     """Converts a batch of images into rgb + gradient
 
     """
-    def __init__(self):
+    def __init__(self, mix = True):
         super(RGB2Mixed, self).__init__()
         self.Tensor2Gradient = Tensor2Gradient()
+        self.mix = mix
 
     def forward(self,x):
         #split channels
         grad = self.Tensor2Gradient(x) 
 
-        # fuse both channels
-        out = torch.cat((grad,x),1)
-        return out
+        if self.mix:
+            # fuse both channels
+            out = torch.cat((grad,x),1)
+            return out
+        return grad
 
 class Mixed2RGB(nn.Module):
     """Converts a batch of images containing rgb + gradient channels into rgb
 
+        mode: ["mix" "mean", "grad","id"]
     """
-    def __init__(self, img_size):
+    def __init__(self, img_size, mode ="mix"):
         super(Mixed2RGB, self).__init__()
         self.Gradient2Tensor = Gradient2Tensor(img_size[0],img_size[1])
-        self.mix_layer = nn.Conv2d(6, 3, kernel_size=3, stride=1, padding=1, bias=True)
+        self.mode = mode
+
+        if mode =="mix":
+            self.mix_layer = nn.Conv2d(6, 3, kernel_size=3, stride=1, padding=1, bias=True) 
 
     def forward(self,x):
+
+        if (self.mode == "grad"):
+            return self.Gradient2Tensor(x),x
+        elif (self.mode == "id"):
+            return x
+        
         #split channels
-        grad_out, rgb_out = torch.split(x, (6,3), 1)
-
+        grad, rgb_out = torch.split(x, (6,3), 1)
         # transform gradients back to rgb
-        grad_out = self.Gradient2Tensor(grad_out)
+        grad_out = self.Gradient2Tensor(grad)
 
-        # fuse both channels
-        out = torch.cat((grad_out,rgb_out),1)
-        out = self.mix_layer(out)
-        return out
+        if (self.mode == "mix"):
+            #fuse both channels
+            out = torch.cat((grad_out,rgb_out),1)
+            return self.mix_layer(out), grad
+        elif (self.mode == "mean"):
+            # avg
+            return 0.5*(grad_out + rgb_out), grad
+        return x
     
 
 

@@ -1,6 +1,7 @@
 # lightning.pytorch==2.4.0
 seed_everything: true
 trainer:
+  name: SwinIR-Grad
   accelerator: gpu
   strategy: auto
   devices: [0]
@@ -9,7 +10,7 @@ trainer:
   logger: null
   callbacks: null
   fast_dev_run: false
-  max_epochs: 500
+  max_epochs: 200
   min_epochs: null
   max_steps: -1
   min_steps: null
@@ -27,8 +28,8 @@ trainer:
   enable_progress_bar: null
   enable_model_summary: null
   accumulate_grad_batches: 1
-  gradient_clip_val: null
-  gradient_clip_algorithm: null
+  gradient_clip_val: 0.1
+  gradient_clip_algorithm: norm
   deterministic: null
   benchmark: null
   inference_mode: true
@@ -41,11 +42,11 @@ trainer:
   reload_dataloaders_every_n_epochs: 0
   default_root_dir: null
 model:
-  grad_weight: 4.0
+  grad_weight: 0.0
   img_size:
   - 128
   - 128
-  patch_size: 4
+  patch_size: 2
   in_chans: 3
   embed_dim: 96
   depths:
@@ -58,7 +59,7 @@ model:
   - 6
   - 6
   - 6
-  window_size: 8
+  window_size: 4
   mlp_ratio: 4.0
   qkv_bias: true
   qk_scale: null
@@ -73,6 +74,8 @@ model:
   upsampler: pixelshuffle
   resi_connection: 1conv
   use_gradients: true
+  mode: "mix"
+  mix: true
 data:
   train: /shared/DIV2K/DIV2K_train_HR/
   val: /shared/DIV2K/DIV2K_valid_HR/
@@ -84,3 +87,5 @@ data:
   - 256
   batch_size: 16
 ckpt_path: null
+
+# python train.py fit  -c config-SR.yaml --trainer.devices [0] 

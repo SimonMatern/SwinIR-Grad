@@ -9,14 +9,16 @@ from models.network_swinir import SwinIR
 from gradients import Tensor2Gradient
 import lightning as L
 from lightning.pytorch.cli import LightningCLI
-from kornia.losses import ssim_loss
+from kornia.losses import ssim_loss, psnr_loss
+#from lightning.pytorch.loggers import TensorBoardLogger
 
 class DIV2K(Dataset):
-    def __init__(self, img_dir, lr_size=(256,256), hr_size=(512,512)):
+    def __init__(self, img_dir, lr_size=(256,256), hr_size=(256,256), augm=None):
         self.img_dir = img_dir
         self.lr_size = Resize(lr_size)
         self.hr_size = Resize(hr_size)
         self.files = sorted(glob.glob(img_dir+"/*"))
+        self.augm = augm
 
     def __len__(self):
         return len(self.files)
@@ -28,7 +30,16 @@ class DIV2K(Dataset):
         image_lr = self.lr_size(image)
         image_hr = self.hr_size(image)
 
-        return image_lr/255., image_hr/255.
+        if self.augm is None:
+            return image_lr/255., image_hr/255.
+        
+        else:
+            image_lr = image_lr.permute(1, 2, 0).numpy()
+            image_lr = self.augm(images=[image_lr])[0]
+            image_lr = torch.tensor(image_lr).permute(2, 0, 1)
+
+            return image_lr*255.0,image_hr*255.0
+
     
 
 
@@ -52,17 +63,25 @@ class SwinIR_PL(L.LightningModule):
 
         x,y = batch
         y_grad = self.gradient(y)
-        pred_rgb = self.model(x)
-        pred_grad = self.gradient(pred_rgb)
+
+        if self.model.use_gradients:
+            pred_rgb,pred_grad  = self.model(x)
+        else:
+            pred_rgb  = self.model(x)
+            pred_grad = self.gradient(pred_rgb)
 
         loss_grad = self.loss(y_grad,pred_grad)
         loss_rgb = self.loss(y,pred_rgb)
         loss = loss_rgb + self.w*loss_grad
 
         ssim = ssim_loss(pred_rgb,y,7)
-        self.log("L_rgb",loss_grad)
-        self.log("L_grad",loss_rgb)
-        self.log("L_ssim",ssim)
+        psnr = psnr_loss(pred_rgb,y,1.0)
+
+        self.log("L_rgb",loss_rgb, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log("L_grad",loss_grad, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log("L_ssim",ssim, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log("L_psnr",psnr, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log("L_loss",loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
 
         return loss
 
@@ -70,19 +89,28 @@ class SwinIR_PL(L.LightningModule):
 
         x,y = batch
         y_grad = self.gradient(y)
-        pred_rgb = self.model(x)
-        pred_grad = self.gradient(pred_rgb)
+
+        if self.model.use_gradients:
+            pred_rgb, pred_grad  = self.model(x)
+        else:
+            pred_rgb  = self.model(x)
+            pred_grad = self.gradient(pred_rgb)
 
         loss_grad = self.loss(y_grad,pred_grad)
         loss_rgb = self.loss(y,pred_rgb)
         loss = loss_rgb + self.w*loss_grad
 
-        ssim = ssim_loss(pred_rgb,y, 7)
-        self.log("L_rgb_val",loss_grad)
-        self.log("L_grad_val",loss_rgb)
-        self.log("L_ssim_val",ssim)
+        ssim = ssim_loss(pred_rgb,y,7)
+        psnr = psnr_loss(pred_rgb,y,1.0)
+
+        self.log("L_rgb_val",loss_rgb, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log("L_grad_val",loss_grad, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log("L_ssim_val",ssim, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log("L_psnr_val",psnr, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log("L_loss_val",loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
 
         return loss
+
     
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(),lr=(self.lr or self.learning_rate) )
@@ -95,18 +123,19 @@ class SwinIR_PL(L.LightningModule):
 
 class DIV2K_PL(L.LightningDataModule):
     
-    def __init__(self, train, val, lr_size=(256,256), hr_size=(512,512), batch_size=32, **kwargs):
+    def __init__(self, train, val, lr_size=(256,256), hr_size=(512,512), batch_size=32, augm=None, **kwargs):
         super(DIV2K_PL, self).__init__()
         self.train = train
         self.val = val
         self.batch_size = batch_size
         self.lr_size = lr_size
         self.hr_size = hr_size
+        self.augm = augm
         self.prepare_data()
     
     def prepare_data(self):
-        self.train_data = DIV2K(self.train, self.lr_size, self.hr_size) 
-        self.val_data = DIV2K(self.val, self.lr_size, self.hr_size) 
+        self.train_data = DIV2K(self.train, self.lr_size, self.hr_size, self.augm) 
+        self.val_data = DIV2K(self.val, self.lr_size, self.hr_size, self.augm) 
 
     def setup(self, stage):
         # make assignments here (val/train/test split)
@@ -121,7 +150,8 @@ class DIV2K_PL(L.LightningDataModule):
     def val_dataloader(self):
         return DataLoader(self.val_data, batch_size=self.batch_size, shuffle=False, num_workers=16)
 
-def trainer(**args)-> L.Trainer: 
+def trainer(name,**args)-> L.Trainer: 
+    #logger = TensorBoardLogger(save_dir="tb_logs", name=name)
     trainer = L.Trainer(**args)
     return trainer
 

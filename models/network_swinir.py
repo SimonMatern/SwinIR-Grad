@@ -650,20 +650,19 @@ class SwinIR(nn.Module):
                  drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1,
                  ape=False, patch_norm=True,
                  use_checkpoint=False, upscale=2, img_range=1., upsampler='pixelshuffle', resi_connection='1conv',
-                 use_gradients=False,
+                 use_gradients=False, mode="mix", mix=True,  
                  **kwargs):
         super(SwinIR, self).__init__()
 
         num_in_ch = in_chans
         num_out_ch = in_chans
-
+        self.use_gradients = use_gradients
         if use_gradients:
-            num_in_ch = num_in_ch * 3
-            num_out_ch = num_out_ch * 3
-
-            self.Mixed2RGB = Mixed2RGB((img_size[0]*upscale,img_size[1]*upscale))
-            self.RGB2Mixed = RGB2Mixed()
-        else:
+            num_in_ch = num_in_ch * 3 if mix==True else num_in_ch * 2
+            num_out_ch = num_in_ch
+            self.Mixed2RGB = Mixed2RGB((img_size[0]*upscale,img_size[1]*upscale), mode)
+            self.RGB2Mixed = RGB2Mixed(mix=mix)
+        else: 
             self.Mixed2RGB = nn.Identity()
             self.RGB2Mixed = nn.Identity()
 
@@ -834,6 +833,9 @@ class SwinIR(nn.Module):
             x = self.conv_before_upsample(x)
             x = self.conv_last(self.upsample(x))
             x = self.Mixed2RGB(x)
+            if self.use_gradients:
+                x, grad = x
+
 
         elif self.upsampler == 'pixelshuffledirect':
             # for lightweight SR
@@ -857,7 +859,10 @@ class SwinIR(nn.Module):
 
         x = x / self.img_range + self.mean
 
-        return x[:, :, :H*self.upscale, :W*self.upscale]
+        if self.use_gradients:
+            return x[:, :, :H*self.upscale, :W*self.upscale], grad
+        else:
+            return x[:, :, :H*self.upscale, :W*self.upscale]
 
     def flops(self):
         flops = 0

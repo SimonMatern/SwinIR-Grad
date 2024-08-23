@@ -1,6 +1,6 @@
 torchvision
 torch
-numpy
+numpy<2.0.0
 opencv-python
 tqdm
 Pillow
@@ -11,3 +11,4 @@ einops
 kornia
 lightning
 jsonargparse[signatures]>=4.27.7
+imgaug
