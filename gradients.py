@@ -38,7 +38,6 @@ class Mixed2RGB(nn.Module):
             self.mix_layer = nn.Conv2d(6, 3, kernel_size=3, stride=1, padding=1, bias=True) 
 
     def forward(self,x):
-
         if (self.mode == "grad"):
             return self.Gradient2Tensor(x),x
         elif (self.mode == "id"):
@@ -134,6 +133,7 @@ class Gradient2Tensor(nn.Module):
         return laplacian
     
     def forward(self, x):
+
 
         B,C,H,W = x.size()
 

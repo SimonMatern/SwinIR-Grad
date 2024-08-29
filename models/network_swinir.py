@@ -836,7 +836,6 @@ class SwinIR(nn.Module):
             if self.use_gradients:
                 x, grad = x
 
-
         elif self.upsampler == 'pixelshuffledirect':
             # for lightweight SR
             x = self.conv_first(x)
@@ -856,6 +855,9 @@ class SwinIR(nn.Module):
             x_first = self.conv_first(x)
             res = self.conv_after_body(self.forward_features(x_first)) + x_first
             x = x + self.conv_last(res)
+            x = self.Mixed2RGB(x)
+            if self.use_gradients:
+                x, grad = x
 
         x = x / self.img_range + self.mean
 

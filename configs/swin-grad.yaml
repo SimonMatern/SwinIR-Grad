@@ -1,16 +1,16 @@
 # lightning.pytorch==2.4.0
 seed_everything: true
 trainer:
-  name: SwinIR-Grad
-  accelerator: gpu
+  name: null
+  accelerator: auto
   strategy: auto
-  devices: [0]
+  devices: auto
   num_nodes: 1
   precision: null
   logger: null
   callbacks: null
   fast_dev_run: false
-  max_epochs: 200
+  max_epochs: 500
   min_epochs: null
   max_steps: -1
   min_steps: null
@@ -28,8 +28,8 @@ trainer:
   enable_progress_bar: null
   enable_model_summary: null
   accumulate_grad_batches: 1
-  gradient_clip_val: 0.1
-  gradient_clip_algorithm: norm
+  gradient_clip_val: null
+  gradient_clip_algorithm: null
   deterministic: null
   benchmark: null
   inference_mode: true
@@ -42,40 +42,25 @@ trainer:
   reload_dataloaders_every_n_epochs: 0
   default_root_dir: null
 model:
-  grad_weight: 0.0
-  img_size:
-  - 256
-  - 256
-  patch_size: 2
-  in_chans: 3
-  embed_dim: 48
-  depths:
-  - 6
-  - 6
-  - 6
-  - 6
-  num_heads:
-  - 6
-  - 6
-  - 6
-  - 6
-  window_size: 4
-  mlp_ratio: 4.0
-  qkv_bias: true
-  qk_scale: null
-  drop_rate: 0.0
-  attn_drop_rate: 0.0
-  drop_path_rate: 0.1
-  ape: false
-  patch_norm: true
-  use_checkpoint: false
-  upscale: 1
-  img_range: 1.0
-  upsampler: pixelshuffle
-  resi_connection: 1conv
+  grad_weight: 4.0
+  encoder_num_blocks: 10
+  decoder_num_blocks: 10
+  smooth_num_blocks: 6
+  planes: 32
+  downsampling_factor: 0
   use_gradients: true
-  mode: "mix"
-  mix: true
+  mixed: false
+  swin_depth: 4
+  swin_num_heads: 8
+  window_size:
+  - 3
+  - 3
+  - 3
+  patch_size:
+  - 2
+  - 4
+  - 4
+  mode: softmax
 data:
   train: /shared/DIV2K/DIV2K_train_HR/
   val: /shared/DIV2K/DIV2K_valid_HR/
@@ -85,13 +70,7 @@ data:
   hr_size:
   - 256
   - 256
-  batch_size: 8
-  augm:
-      class_path: imgaug.augmenters.Grayscale
-      init_args:
-        alpha: 
-          - 1
-          - 1
+  len: 8
+  batch_size: 10
+  augm: color
 ckpt_path: null
-
-# python train.py fit  -c config-SR.yaml --trainer.devices [0] 

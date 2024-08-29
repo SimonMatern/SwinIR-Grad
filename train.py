@@ -3,7 +3,6 @@ from torchvision.io import read_image
 from torchvision.transforms import Resize
 from torch.utils.data import Dataset, DataLoader
 import torch.nn as nn
-import torch.nn.functional as F
 import glob
 from models.network_swinir import SwinIR
 from gradients import Tensor2Gradient
@@ -11,14 +10,34 @@ import lightning as L
 from lightning.pytorch.cli import LightningCLI
 from kornia.losses import ssim_loss, psnr_loss
 #from lightning.pytorch.loggers import TensorBoardLogger
+from models.model import DeepAggNet
+import imgaug.augmenters as iaa
+from imgaug import parameters as iap
+import numpy as np
 
 class DIV2K(Dataset):
-    def __init__(self, img_dir, lr_size=(256,256), hr_size=(256,256), augm=None):
+    def __init__(self, img_dir, lr_size=(256,256), hr_size=(256,256), len=1, augm=None):
         self.img_dir = img_dir
         self.lr_size = Resize(lr_size)
         self.hr_size = Resize(hr_size)
         self.files = sorted(glob.glob(img_dir+"/*"))
-        self.augm = augm
+        
+        if augm=="color":
+            augs =[
+                iaa.MultiplyBrightness((0.5, 1.5)),
+                iaa.WithBrightnessChannels(iaa.Add((-100, 100))),
+                iaa.BlendAlphaSimplexNoise(
+                foreground=iaa.Multiply(iap.Choice([0.5, 1.5]), per_channel=True),
+            )]
+            def augment(images,):
+                aug = lambda x: np.random.choice(augs)(images=[x])[0]
+                res = [aug(img) for img in images]
+                return res
+            
+            self.augm = augment
+        else:
+            self.augm = augm
+        self.len = len
 
     def __len__(self):
         return len(self.files)
@@ -35,10 +54,10 @@ class DIV2K(Dataset):
         
         else:
             image_lr = image_lr.permute(1, 2, 0).numpy()
-            image_lr = self.augm(images=[image_lr])[0]
-            image_lr = torch.tensor(image_lr).permute(2, 0, 1)
+            images_lr = [self.augm(images=[image_lr])[0] for _ in range(self.len)]
+            images_lr = torch.stack([torch.tensor(img).permute(2, 0, 1) for img in images_lr])
 
-            return image_lr*255.0,image_hr*255.0
+            return images_lr/255.0,image_hr/255.0
 
     
 
@@ -50,18 +69,21 @@ class SwinIR_PL(L.LightningModule):
         """
         super(SwinIR_PL, self).__init__()
 
-        self.model = SwinIR(**kwargs)
+        #self.model = SwinIR(**kwargs)
+        self.model = DeepAggNet(**kwargs)
         self.loss = nn.L1Loss()
         self.gradient =  Tensor2Gradient()
         self.w = grad_weight
         self.lr = 1e-3
 
     def forward(self, x):
+
         return self.model(x)
     
     def training_step(self, batch, batch_idx):
 
         x,y = batch
+        
         y_grad = self.gradient(y)
 
         if self.model.use_gradients:
@@ -123,19 +145,21 @@ class SwinIR_PL(L.LightningModule):
 
 class DIV2K_PL(L.LightningDataModule):
     
-    def __init__(self, train, val, lr_size=(256,256), hr_size=(512,512), batch_size=32, augm=None, **kwargs):
+    def __init__(self, train, val, lr_size=(256,256), hr_size=(512,512), batch_size=32, augm=None, len=1, **kwargs):
         super(DIV2K_PL, self).__init__()
         self.train = train
         self.val = val
         self.batch_size = batch_size
         self.lr_size = lr_size
         self.hr_size = hr_size
+
         self.augm = augm
+        self.len=len
         self.prepare_data()
     
     def prepare_data(self):
-        self.train_data = DIV2K(self.train, self.lr_size, self.hr_size, self.augm) 
-        self.val_data = DIV2K(self.val, self.lr_size, self.hr_size, self.augm) 
+        self.train_data = DIV2K(self.train, self.lr_size, self.hr_size, self.len, self.augm) 
+        self.val_data = DIV2K(self.val, self.lr_size, self.hr_size, self.len, self.augm) 
 
     def setup(self, stage):
         # make assignments here (val/train/test split)
