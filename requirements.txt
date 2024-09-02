@@ -12,3 +12,4 @@ kornia
 lightning
 jsonargparse[signatures]>=4.27.7
 imgaug
+imagecorruptions

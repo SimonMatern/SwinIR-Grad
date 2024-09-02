@@ -11,6 +11,8 @@ import torch.nn.functional as F
 import torch.utils.checkpoint as checkpoint
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 from gradients import Mixed2RGB, RGB2Mixed
+from models.model import SwinTransAgg
+from einops import rearrange
 
 class Mlp(nn.Module):
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
@@ -855,6 +857,179 @@ class SwinIR(nn.Module):
             x_first = self.conv_first(x)
             res = self.conv_after_body(self.forward_features(x_first)) + x_first
             x = x + self.conv_last(res)
+            x = self.Mixed2RGB(x)
+            if self.use_gradients:
+                x, grad = x
+
+        x = x / self.img_range + self.mean
+
+        if self.use_gradients:
+            return x[:, :, :H*self.upscale, :W*self.upscale], grad
+        else:
+            return x[:, :, :H*self.upscale, :W*self.upscale]
+
+    def flops(self):
+        flops = 0
+        H, W = self.patches_resolution
+        flops += H * W * 3 * self.embed_dim * 9
+        flops += self.patch_embed.flops()
+        for i, layer in enumerate(self.layers):
+            flops += layer.flops()
+        flops += H * W * 3 * self.embed_dim * self.embed_dim
+        flops += self.upsample.flops()
+        return flops
+
+
+class SwinIR3D(nn.Module):
+    r""" SwinIR3D
+        A PyTorch impl of : `SwinIR: Image Restoration Using Swin Transformer`, based on Swin Transformer.
+
+    Args:
+        img_size (int | tuple(int)): Input image size. Default 64
+        patch_size (int | tuple(int)): Patch size. Default: 1
+        in_chans (int): Number of input image channels. Default: 3
+        embed_dim (int): Patch embedding dimension. Default: 96
+        depths (tuple(int)): Depth of each Swin Transformer layer.
+        num_heads (tuple(int)): Number of attention heads in different layers.
+        window_size (int): Window size. Default: 7
+        mlp_ratio (float): Ratio of mlp hidden dim to embedding dim. Default: 4
+        qkv_bias (bool): If True, add a learnable bias to query, key, value. Default: True
+        qk_scale (float): Override default qk scale of head_dim ** -0.5 if set. Default: None
+        drop_rate (float): Dropout rate. Default: 0
+        attn_drop_rate (float): Attention dropout rate. Default: 0
+        drop_path_rate (float): Stochastic depth rate. Default: 0.1
+        norm_layer (nn.Module): Normalization layer. Default: nn.LayerNorm.
+        ape (bool): If True, add absolute position embedding to the patch embedding. Default: False
+        patch_norm (bool): If True, add normalization after patch embedding. Default: True
+        use_checkpoint (bool): Whether to use checkpointing to save memory. Default: False
+        upscale: Upscale factor. 2/3/4/8 for image SR, 1 for denoising and compress artifact reduction
+        img_range: Image range. 1. or 255.
+        upsampler: The reconstruction reconstruction module. 'pixelshuffle'/'pixelshuffledirect'/'nearest+conv'/None
+        resi_connection: The convolutional block before residual connection. '1conv'/'3conv'
+    """
+
+    def __init__(self, img_size=(256,256), patch_size=(2,4,4), in_chans=3,
+                 embed_dim=64, swin_depth=8, swin_num_heads=8, window_size=(3,3,3), upscale=1, img_range=1., upsampler='pixelshuffle',
+                 use_gradients=False, mode="mix", mix=True,  
+                 **kwargs):
+        super(SwinIR3D, self).__init__()
+
+        num_in_ch = in_chans
+        num_out_ch = in_chans
+        self.use_gradients = use_gradients
+        if use_gradients:
+            num_in_ch = num_in_ch * 3 if mix==True else num_in_ch * 2
+            num_out_ch = num_in_ch
+            self.Mixed2RGB = Mixed2RGB((img_size[0]*upscale,img_size[1]*upscale), mode)
+            self.RGB2Mixed = RGB2Mixed(mix=mix)
+        else: 
+            self.Mixed2RGB = nn.Identity()
+            self.RGB2Mixed = nn.Identity()
+
+        num_feat = 64
+        self.img_range = img_range
+        if in_chans == 3:
+            rgb_mean = (0.4488, 0.4371, 0.4040)
+            self.mean = torch.Tensor(rgb_mean).view(1, 3, 1, 1)
+        else:
+            self.mean = torch.zeros(1, 1, 1, 1)
+        self.upscale = upscale
+        self.upsampler = upsampler
+        self.window_size = window_size
+        
+
+        
+        #####################################################################################################
+        ################################### 1, shallow feature extraction ###################################
+        self.conv_first = nn.Conv2d(num_in_ch, embed_dim, 3, 1, 1)
+
+        #####################################################################################################
+        ################################### 2, deep feature extraction ######################################
+        self.agg = SwinTransAgg(in_dim=embed_dim, depth=swin_depth, heads = swin_num_heads, window_size=window_size,patch_size=patch_size, **kwargs)
+        self.conv_after_body = nn.Conv2d(embed_dim, embed_dim, 3, 1, 1)
+
+        #####################################################################################################
+        ################################ 3, high quality image reconstruction ################################
+        if self.upsampler == 'pixelshuffle':
+            # for classical SR
+            self.conv_before_upsample = nn.Sequential(nn.Conv2d(embed_dim, num_feat, 3, 1, 1),
+                                                      nn.LeakyReLU(inplace=True))
+            self.upsample = Upsample(upscale, num_feat)
+            self.conv_last = nn.Conv2d(num_feat, num_out_ch, 3, 1, 1)
+            
+        else:
+            # for image denoising and JPEG compression artifact reduction
+            self.conv_last = nn.Conv2d(embed_dim, num_out_ch, 3, 1, 1)
+
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            trunc_normal_(m.weight, std=.02)
+            if isinstance(m, nn.Linear) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+
+    @torch.jit.ignore
+    def no_weight_decay(self):
+        return {'absolute_pos_embed'}
+
+    @torch.jit.ignore
+    def no_weight_decay_keywords(self):
+        return {'relative_position_bias_table'}
+
+    def check_image_size(self, x):
+        _, _, h, w = x.size()
+        mod_pad_h = (self.window_size - h % self.window_size) % self.window_size
+        mod_pad_w = (self.window_size - w % self.window_size) % self.window_size
+        x = F.pad(x, (0, mod_pad_w, 0, mod_pad_h), 'reflect')
+        return x
+
+    def forward_features(self, x):
+        x_size = (x.shape[2], x.shape[3])
+        x = self.patch_embed(x)
+        if self.ape:
+            x = x + self.absolute_pos_embed
+        x = self.pos_drop(x)
+
+        for layer in self.layers:
+            x = layer(x, x_size)
+
+        x = self.norm(x)  # B L C
+        x = self.patch_unembed(x, x_size)
+
+        return x
+
+    def forward(self, x):
+
+        B, S, C, H, W = x.size()
+        x = rearrange(x, "b s c h w -> (b s) c h w")
+
+        
+        self.mean = self.mean.type_as(x)
+        x = (x - self.mean) * self.img_range
+        x = self.RGB2Mixed(x)
+
+        if self.upsampler == 'pixelshuffle':
+            # for classical SR
+            x = self.conv_first(x)
+            x = rearrange(x, "(b s) c h w -> b s c h w", b=B)
+            x = self.agg(x)
+
+            x = self.conv_after_body(x)
+            x = self.conv_before_upsample(x)
+            x = self.conv_last(self.upsample(x))
+            x = self.Mixed2RGB(x)
+            if self.use_gradients:
+                x, grad = x
+        else:
+            # for image denoising and JPEG compression artifact reduction
+            x = self.conv_first(x)
+            x = self.agg(x)
+            x = self.conv_after_body(x)
+            x = self.conv_last(x)
             x = self.Mixed2RGB(x)
             if self.use_gradients:
                 x, grad = x

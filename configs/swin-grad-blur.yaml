@@ -72,5 +72,5 @@ data:
   - 256
   len: 8
   batch_size: 10
-  augm: color
+  augm: blur
 ckpt_path: null

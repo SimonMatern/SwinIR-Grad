@@ -35,6 +35,18 @@ class DIV2K(Dataset):
                 return res
             
             self.augm = augment
+        elif augm=="blur":
+            augs_blur =[
+                iaa.imgcorruptlike.Pixelate(severity=(1,5)),
+                iaa.imgcorruptlike.MotionBlur(severity=(1,5)),
+                iaa.imgcorruptlike.DefocusBlur(severity=(1,5))]
+
+            def augment(images,):
+                aug = lambda x: np.random.choice(augs_blur)(images=[x])[0]
+                res = [aug(img) for img in images]
+                return res
+            self.augm = augment
+
         else:
             self.augm = augm
         self.len = len
