@@ -11,6 +11,7 @@ from lightning.pytorch.cli import LightningCLI
 from kornia.losses import ssim_loss, psnr_loss
 #from lightning.pytorch.loggers import TensorBoardLogger
 from models.model import DeepAggNet
+from models.network_swinir import SwinIR3D
 import imgaug.augmenters as iaa
 from imgaug import parameters as iap
 import numpy as np
@@ -46,7 +47,8 @@ class DIV2K(Dataset):
                 res = [aug(img) for img in images]
                 return res
             self.augm = augment
-
+        elif augm=="jpeg":
+            self.augm = iaa.JpegCompression((50,99))
         else:
             self.augm = augm
         self.len = len
@@ -82,7 +84,8 @@ class SwinIR_PL(L.LightningModule):
         super(SwinIR_PL, self).__init__()
 
         #self.model = SwinIR(**kwargs)
-        self.model = DeepAggNet(**kwargs)
+        #self.model = DeepAggNet(**kwargs)
+        self.model = SwinIR3D(**kwargs)
         self.loss = nn.L1Loss()
         self.gradient =  Tensor2Gradient()
         self.w = grad_weight

@@ -910,7 +910,7 @@ class SwinIR3D(nn.Module):
 
     def __init__(self, img_size=(256,256), patch_size=(2,4,4), in_chans=3,
                  embed_dim=64, swin_depth=8, swin_num_heads=8, window_size=(3,3,3), upscale=1, img_range=1., upsampler='pixelshuffle',
-                 use_gradients=False, mode="mix", mix=True,  
+                 use_gradients=False, mode="mix", mixed=True,  
                  **kwargs):
         super(SwinIR3D, self).__init__()
 
@@ -918,10 +918,10 @@ class SwinIR3D(nn.Module):
         num_out_ch = in_chans
         self.use_gradients = use_gradients
         if use_gradients:
-            num_in_ch = num_in_ch * 3 if mix==True else num_in_ch * 2
+            num_in_ch = num_in_ch * 3 if mixed==True else num_in_ch * 2
             num_out_ch = num_in_ch
             self.Mixed2RGB = Mixed2RGB((img_size[0]*upscale,img_size[1]*upscale), mode)
-            self.RGB2Mixed = RGB2Mixed(mix=mix)
+            self.RGB2Mixed = RGB2Mixed(mix=mixed)
         else: 
             self.Mixed2RGB = nn.Identity()
             self.RGB2Mixed = nn.Identity()
@@ -946,7 +946,8 @@ class SwinIR3D(nn.Module):
         #####################################################################################################
         ################################### 2, deep feature extraction ######################################
         self.agg = SwinTransAgg(in_dim=embed_dim, depth=swin_depth, heads = swin_num_heads, window_size=window_size,patch_size=patch_size, **kwargs)
-        self.conv_after_body = nn.Conv2d(embed_dim, embed_dim, 3, 1, 1)
+        self.conv_after_body = nn.Sequential(nn.Conv2d(embed_dim, embed_dim, 3, 1, 1),
+                                                      nn.LeakyReLU(inplace=True))
 
         #####################################################################################################
         ################################ 3, high quality image reconstruction ################################
@@ -1009,7 +1010,7 @@ class SwinIR3D(nn.Module):
 
         
         self.mean = self.mean.type_as(x)
-        x = (x - self.mean) * self.img_range
+        #x = (x - self.mean) * self.img_range
         x = self.RGB2Mixed(x)
 
         if self.upsampler == 'pixelshuffle':
@@ -1027,6 +1028,7 @@ class SwinIR3D(nn.Module):
         else:
             # for image denoising and JPEG compression artifact reduction
             x = self.conv_first(x)
+            x = rearrange(x, "(b s) c h w -> b s c h w", b=B)
             x = self.agg(x)
             x = self.conv_after_body(x)
             x = self.conv_last(x)
@@ -1034,7 +1036,7 @@ class SwinIR3D(nn.Module):
             if self.use_gradients:
                 x, grad = x
 
-        x = x / self.img_range + self.mean
+        #x = x / self.img_range + self.mean
 
         if self.use_gradients:
             return x[:, :, :H*self.upscale, :W*self.upscale], grad
