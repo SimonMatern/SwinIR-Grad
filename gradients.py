@@ -136,7 +136,7 @@ class Gradient2Tensor(nn.Module):
 
 
         B,C,H,W = x.size()
-
+        print(x.size())
         x_grad, y_grad = torch.split(x, C//2,1)
         x_grad = rearrange(x_grad, 'b c h w -> (b c) 1 h w')
         y_grad = rearrange(y_grad, 'b c h w -> (b c) 1 h w')

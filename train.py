@@ -93,7 +93,10 @@ class SwinIR_PL(L.LightningModule):
 
     def forward(self, x):
 
-        return self.model(x)
+        out = self.model(x)
+        if self.model.use_gradients:
+            out = out[0]
+        return out
     
     def training_step(self, batch, batch_idx):
 
