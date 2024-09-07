@@ -922,6 +922,7 @@ class SwinIR3D(nn.Module):
             num_out_ch = num_in_ch
             self.Mixed2RGB = Mixed2RGB((img_size[0]*upscale,img_size[1]*upscale), mode)
             self.RGB2Mixed = RGB2Mixed(mix=mixed)
+            self.offset = lambda x: x.mean(1).mean([2,3], True)
         else: 
             self.Mixed2RGB = nn.Identity()
             self.RGB2Mixed = nn.Identity()
@@ -1006,10 +1007,11 @@ class SwinIR3D(nn.Module):
     def forward(self, x):
 
         B, S, C, H, W = x.size()
+        avg = self.offset(x)
         x = rearrange(x, "b s c h w -> (b s) c h w")
 
-        
-        self.mean = self.mean.type_as(x)
+
+        #self.mean = self.mean.type_as(x)
         #x = (x - self.mean) * self.img_range
         x = self.RGB2Mixed(x)
 
@@ -1022,8 +1024,8 @@ class SwinIR3D(nn.Module):
             x = self.conv_after_body(x)
             x = self.conv_before_upsample(x)
             x = self.conv_last(self.upsample(x))
-            x = self.Mixed2RGB(x)
             if self.use_gradients:
+                x = self.Mixed2RGB(x, avg)
                 x, grad = x
         else:
             # for image denoising and JPEG compression artifact reduction
@@ -1032,9 +1034,8 @@ class SwinIR3D(nn.Module):
             x = self.agg(x)
             x = self.conv_after_body(x)
             x = self.conv_last(x)
-            x = self.Mixed2RGB(x)
             if self.use_gradients:
-                x, grad = x
+                x, grad = self.Mixed2RGB(x,avg)
 
         #x = x / self.img_range + self.mean
 
