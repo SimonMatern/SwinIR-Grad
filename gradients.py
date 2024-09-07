@@ -136,7 +136,6 @@ class Gradient2Tensor(nn.Module):
 
 
         B,C,H,W = x.size()
-        print(x.size())
         x_grad, y_grad = torch.split(x, C//2,1)
         x_grad = rearrange(x_grad, 'b c h w -> (b c) 1 h w')
         y_grad = rearrange(y_grad, 'b c h w -> (b c) 1 h w')
@@ -158,7 +157,7 @@ class Gradient2Tensor(nn.Module):
         if (H ==self.H and W ==self.W):
             inv_laplacian = self.inv_laplacian
         else:
-            print("Computing (Inverse) Laplacian ...")
+            #print("Computing (Inverse) Laplacian ...")
             inv_laplacian = self.inverse_laplacian(H,W).to(x.device)
 
         # Division in Frequency Domain
