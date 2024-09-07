@@ -37,16 +37,20 @@ class Mixed2RGB(nn.Module):
         if mode =="mix":
             self.mix_layer = nn.Conv2d(6, 3, kernel_size=3, stride=1, padding=1, bias=True) 
 
-    def forward(self,x):
+    def forward(self,x, offset=None):
+        
+        if offset is None:
+            offset = 0
+        
         if (self.mode == "grad"):
-            return self.Gradient2Tensor(x),x
+            return self.Gradient2Tensor(x)+offset,x
         elif (self.mode == "id"):
             return x
         
         #split channels
         grad, rgb_out = torch.split(x, (6,3), 1)
         # transform gradients back to rgb
-        grad_out = self.Gradient2Tensor(grad)
+        grad_out = self.Gradient2Tensor(grad)+offset
 
         if (self.mode == "mix"):
             #fuse both channels
