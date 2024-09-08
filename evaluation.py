@@ -210,9 +210,9 @@ if __name__ == '__main__':
         for ckpt_path in ckpts:
 
                 torch.cuda.empty_cache()
-                # if os.path.isfile(f'{ckpt_path}/{N}.csv'):
-                #     print("Evaluation already exists")
-                #     continue
+                if os.path.isfile(f'{ckpt_path}/{N}.csv'):
+                    print("Evaluation already exists")
+                    continue
                 try:
                     evaluation(ckpt_path, data_dirs, N=N,  samples=1, device="cuda:0")
                 except RuntimeError as e:
