@@ -49,6 +49,8 @@ class DIV2K(Dataset):
             self.augm = augment
         elif augm=="jpeg":
             self.augm = iaa.JpegCompression((50,99))
+        elif augm=="noise":
+            self.augm = iaa.AdditiveGaussianNoise(scale=(25))
         else:
             self.augm = augm
         self.len = len

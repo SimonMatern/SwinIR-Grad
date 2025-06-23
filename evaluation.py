@@ -61,6 +61,8 @@ class TestSet(Dataset):
             self.augm = augment
         elif augm=="jpeg":
             self.augm = iaa.JpegCompression((50,99))
+        elif augm=="noise":
+            self.augm = iaa.AdditiveGaussianNoise(scale=(25))
         else:
             self.augm = augm
         self.len = len
@@ -206,7 +208,7 @@ if __name__ == '__main__':
     ckpts = list(reversed(sorted(glob.glob("lightning_logs/version*"))))
     random.shuffle(ckpts)
     print(ckpts)
-    for N in list(reversed([2, 4, 8, 10, 16, 20, 30, 40, 50])):
+    for N in list(reversed([2, 4, 8, 10, 16, 20, 30, 40])):
         for ckpt_path in ckpts:
 
                 torch.cuda.empty_cache()

@@ -910,19 +910,21 @@ class SwinIR3D(nn.Module):
 
     def __init__(self, img_size=(256,256), patch_size=(2,4,4), in_chans=3,
                  embed_dim=64, swin_depth=8, swin_num_heads=8, window_size=(3,3,3), upscale=1, img_range=1., upsampler='pixelshuffle',
-                 use_gradients=False, mode="mix", mixed=True,  
+                 use_gradients=False, mode="mix", mixed=True,  offset_estimation=False,
                  **kwargs):
         super(SwinIR3D, self).__init__()
 
         num_in_ch = in_chans
         num_out_ch = in_chans
         self.use_gradients = use_gradients
+        self.offset_estimation = offset_estimation
+        self.offset = lambda x: x.mean(1).mean([2,3], True)
+
         if use_gradients:
             num_in_ch = num_in_ch * 3 if mixed==True else num_in_ch * 2
             num_out_ch = num_in_ch
             self.Mixed2RGB = Mixed2RGB((img_size[0]*upscale,img_size[1]*upscale), mode)
             self.RGB2Mixed = RGB2Mixed(mix=mixed)
-            self.offset = lambda x: x.mean(1).mean([2,3], True)
         else: 
             self.Mixed2RGB = nn.Identity()
             self.RGB2Mixed = nn.Identity()
@@ -1007,7 +1009,11 @@ class SwinIR3D(nn.Module):
     def forward(self, x):
 
         B, S, C, H, W = x.size()
-        avg = self.offset(x)
+        if self.offset_estimation:
+            avg = self.offset(x)
+        else:
+            avg = 0
+            
         x = rearrange(x, "b s c h w -> (b s) c h w")
 
 
